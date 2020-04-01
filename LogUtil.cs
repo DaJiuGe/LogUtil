@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -7,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace LogUtil
 {
-    public class LogUtil
+    public class LogLib
     {
         public enum LogMode
         {
@@ -43,6 +44,9 @@ namespace LogUtil
         private static CancellationTokenSource _cts = null;
         private static object _logSignLock = new object();
         private static int _logSign = 0;
+        private static object _flushLock = new object();
+        private static int _flushCount = 0;
+        private const int _flushTarget = 100;
         private static object _synchroLock = new object();
         private static StreamWriter _synchronizedStream = null;
 
@@ -82,6 +86,7 @@ namespace LogUtil
                 {
                     if (_cts.Token.IsCancellationRequested)
                     {
+                        sw.Flush();
                         _cts = null;
                         break;
                     }
@@ -113,7 +118,12 @@ namespace LogUtil
                         else
                         {
                             sw.WriteLine(newItem);
-                            sw.Flush();
+                            _flushCount++;
+                            if (_flushCount == _flushTarget)
+                            {
+                                sw.Flush();
+                                _flushCount = 0;
+                            }
                         }
                     }
                 }
@@ -128,6 +138,7 @@ namespace LogUtil
             }
             else if (_logMode == LogMode.SynchroWithStreamOpenOnce)
             {
+                _synchronizedStream?.Flush();
                 _synchronizedStream?.Dispose();
                 _synchronizedStream?.Close();
             }
@@ -220,7 +231,7 @@ namespace LogUtil
             {
                 LogAsync(logItem);
             }
-            else if(_logMode == LogMode.Synchro)
+            else if (_logMode == LogMode.Synchro)
             {
                 LogSynchro(logItem);
             }
@@ -258,7 +269,15 @@ namespace LogUtil
                 Activate(LogMode.SynchroWithStreamOpenOnce);
             }
             _synchronizedStream.WriteLine(msg);
-            _synchronizedStream.Flush();
+            lock (_flushLock)
+            {
+                _flushCount++;
+                if (_flushCount == _flushTarget)
+                {
+                    _synchronizedStream.Flush();
+                    _flushCount = 0;
+                }
+            }
         }
     }
 }
